@@ -73,13 +73,15 @@ constexpr Rect Full{0, 0, Width, Height};
 
 // "V3" layout (no turn-by-turn, no street name). Top row: current speed-limit
 // sign (left) and current speed (right). Bottom row: next speed alert (left)
-// and any other alert (right).
+// and any other alert (right). A street-name strip runs along the bottom.
 constexpr int V3SplitX = Width / 2;
 constexpr int V3MainHeight = Height * 140 / 240;
 constexpr Rect V3Sign{0, 0, V3SplitX, V3MainHeight};
 constexpr Rect V3Speed{V3SplitX, 0, Width - V3SplitX, V3MainHeight};
-constexpr Rect V3NextAlert{0, V3MainHeight, V3SplitX, Height - V3MainHeight};
-constexpr Rect V3Alert{V3SplitX, V3MainHeight, Width - V3SplitX, Height - V3MainHeight};
+constexpr int V3StreetHeight = Height * 28 / 240;
+constexpr Rect V3NextAlert{0, V3MainHeight, V3SplitX, Height - V3MainHeight - V3StreetHeight};
+constexpr Rect V3Alert{V3SplitX, V3MainHeight, Width - V3SplitX, Height - V3MainHeight - V3StreetHeight};
+constexpr Rect V3Street{0, Height - V3StreetHeight, Width, V3StreetHeight};
 
 constexpr int scaleCoordinate(int value, int logicalExtent, int physicalExtent) {
     return (value * physicalExtent + logicalExtent / 2) / logicalExtent;
@@ -101,8 +103,9 @@ constexpr int regionPixels(const Rect &logical) {
 
 constexpr int maxInt(int left, int right) { return left > right ? left : right; }
 constexpr int MaxV3RegionPixels = maxInt(
-    maxInt(regionPixels(V3Sign), regionPixels(V3Speed)),
-    maxInt(regionPixels(V3Alert), regionPixels(V3NextAlert)));
+    maxInt(maxInt(regionPixels(V3Sign), regionPixels(V3Speed)),
+           maxInt(regionPixels(V3Alert), regionPixels(V3NextAlert))),
+    regionPixels(V3Street));
 constexpr int MaxRegionPixels = maxInt(maxInt(
     maxInt(maxInt(regionPixels(Maneuver), regionPixels(Speed)), regionPixels(SpeedCluster)),
     maxInt(maxInt(regionPixels(Limits), regionPixels(Alerts)),

@@ -510,8 +510,9 @@ void HudRenderer::render(const HudState &state, const DeviceSettings &settings,
     clockActive_ = state.connected && state.hasProducerState && currentClockSecond != INT64_MIN;
     const bool streetChanged = firstFrame_ || !sameText(state.currentStreet, previous_.currentStreet);
     const bool noNavigation = v3Mode(settings);
-    const bool streetVisible = !noNavigation && settings.showStreet;
-    const int availableStreetWidth = currentClockMinute != INT64_MIN ? 248 : 310;
+    const bool streetVisible = settings.showStreet;
+    const int availableStreetWidth = noNavigation ? layout::V3Street.width - 10
+        : currentClockMinute != INT64_MIN ? 248 : 310;
     Canvas metrics(buffer_, layout::Street.width, layout::Street.height);
     const int streetWidth = streetVisible
         ? metrics.fontTextWidth(displayStreet(state), assets::kTextMedium) : 0;
@@ -575,7 +576,7 @@ void HudRenderer::render(const HudState &state, const DeviceSettings &settings,
     auto renderAll = [&]() {
         if (noNavigation) {
             for (const Rect &region : {layout::V3Sign, layout::V3Speed, layout::V3NextAlert,
-                                       layout::V3Alert})
+                                       layout::V3Alert, layout::V3Street})
                 renderRegion(region,state,settings,systemStatus);
             return;
         }
@@ -614,6 +615,10 @@ void HudRenderer::render(const HudState &state, const DeviceSettings &settings,
         if (alertsChanged(state, previous_)) {
             renderRegion(layout::V3NextAlert,state,settings,systemStatus);
             renderRegion(layout::V3Alert,state,settings,systemStatus);
+        }
+        if (streetChanged || settings.showStreet != previousSettings_.showStreet || marqueeFrameChanged) {
+            renderRegion(layout::V3Street,state,settings,systemStatus);
+            streetRendered = true;
         }
     } else {
         if (maneuverChanged(state, previous_)) renderRegion(layout::Maneuver,state,settings,systemStatus);
@@ -1001,7 +1006,7 @@ void HudRenderer::renderGuidance(Canvas &canvas, const HudState &state,
 void HudRenderer::renderStreet(Canvas &canvas, const HudState &state, const DeviceSettings &settings) {
     canvas.clear(colors::Panel);
     const int textY = std::max(0, (canvas.height() - assets::kTextMedium.lineHeight) / 2);
-    const bool noNavigation = settings.speedDisplayMode == SpeedDisplayMode::NoNavigation;
+    const bool noNavigation = v3Mode(settings);
     const int64_t millis = localClockMillis(state);
     const int64_t second = millis == INT64_MIN ? INT64_MIN : millis / 1000LL;
     const bool haveClock = !noNavigation && second != INT64_MIN;
@@ -1084,9 +1089,9 @@ void HudRenderer::renderV3Alert(Canvas &canvas, const HudState &state,
     if (alert.kind == AlertKind::None) return;
     char distance[16]; formatDistance(alert.distanceM,distance,sizeof(distance));
     // Icon above the distance, centered in the cell.
-    const int iconY = canvas.height() * 2 / 5;
+    const int iconY = canvas.height() / 3;
     drawAlertIcon(canvas,canvas.width()/2,iconY,22,alert,true);
-    canvas.fontText(2,iconY + 34,distance,assets::kTextMedium,
+    canvas.fontText(2,iconY + 25,distance,assets::kTextMedium,
                     alertDistanceColor(alert.distanceM, foreground(settings)),
                     canvas.width()-4,true);
 }
