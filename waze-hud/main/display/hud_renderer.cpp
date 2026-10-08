@@ -119,8 +119,8 @@ int64_t localClockMillis(const HudState &state) {
 constexpr int kV3NumberScaleNum = 6;
 constexpr int kV3NumberScaleDen = 5;
 
-// V3: small HH:MM at the top center. The center line falls on the border of the
-// two top cells, so each of them draws the same centered text and clips its half.
+// V3: small HH:MM in the top-right corner, right-aligned just left of the
+// Bluetooth indicator.
 void drawV3Clock(Canvas &canvas, const Rect &region, const HudState &state,
                  const DeviceSettings &settings) {
     const int64_t millis = localClockMillis(state);
@@ -128,10 +128,11 @@ void drawV3Clock(Canvas &canvas, const Rect &region, const HudState &state,
     const int normalizedMinute = static_cast<int>((millis / 60000LL % 1440 + 1440) % 1440);
     char clock[8];
     std::snprintf(clock, sizeof(clock), "%02d:%02d", normalizedMinute / 60, normalizedMinute % 60);
-    constexpr int boxWidth = 80;
+    constexpr int rightEdge = 292;
     constexpr int topY = 4;
-    canvas.fontText(layout::V3SplitX - boxWidth / 2 - region.x, topY - region.y, clock,
-                    assets::kTextMedium, foreground(settings), boxWidth, true);
+    const int textWidth = canvas.fontTextWidth(clock, assets::kTextMedium);
+    canvas.fontText(rightEdge - textWidth - region.x, topY - region.y, clock,
+                    assets::kTextMedium, foreground(settings));
 }
 
 const char *displayStreet(const HudState &state) {
@@ -609,7 +610,7 @@ void HudRenderer::render(const HudState &state, const DeviceSettings &settings,
                                   state.hasMinimumSpeed != previous_.hasMinimumSpeed ||
                                   state.minimumSpeedKmh != previous_.minimumSpeedKmh;
         const bool clockChanged = currentClockMinute != renderedClockMinute_;
-        if (limitChanged || clockChanged) renderRegion(layout::V3Sign,state,settings,systemStatus);
+        if (limitChanged) renderRegion(layout::V3Sign,state,settings,systemStatus);
         if (speedChanged || systemStatusChanged || clockChanged)
             renderRegion(layout::V3Speed,state,settings,systemStatus);
         if (alertsChanged(state, previous_)) {
@@ -685,8 +686,7 @@ void HudRenderer::renderRegion(const Rect &region, const HudState &state,
     else renderStreet(canvas,state,settings);
     if (!systemStatus.visible && state.connected && state.hasProducerState) {
         renderMainIndicators(canvas, region, systemStatus);
-        if (v3Mode(settings) &&
-            (sameRegion(region, layout::V3Sign) || sameRegion(region, layout::V3Speed)))
+        if (v3Mode(settings) && sameRegion(region, layout::V3Speed))
             drawV3Clock(canvas, region, state, settings);
     }
     const esp_err_t result = DisplayDriver::instance().drawRegion(physicalRegion, buffer_);
