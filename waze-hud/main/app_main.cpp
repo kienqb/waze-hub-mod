@@ -38,10 +38,10 @@ constexpr TickType_t kDoublePressTicks = pdMS_TO_TICKS(350);
 #if CONFIG_WAZE_HUD_DISPLAY_CYD_28
 // CYD GPIO34 LDR: larger ADC readings mean less ambient light.
 constexpr uint8_t lightBrightness(int raw, uint8_t current) {
-    return raw >= 1800 ? 30 : raw <= 1400 ? 70 : current;
+    return raw >= 1800 ? 100 : raw <= 1400 ? 100 : current;
 }
-static_assert(lightBrightness(1800, 70) == 30 && lightBrightness(1400, 30) == 70 &&
-              lightBrightness(1600, 30) == 30 && lightBrightness(1600, 70) == 70);
+static_assert(lightBrightness(1800, 100) == 100 && lightBrightness(1400, 100) == 100 &&
+              lightBrightness(1600, 100) == 100 && lightBrightness(1600, 100) == 100);
 
 adc_oneshot_unit_handle_t initLightSensor() {
     adc_oneshot_unit_handle_t adc = nullptr;
