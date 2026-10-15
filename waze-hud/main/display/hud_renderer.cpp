@@ -1,4 +1,5 @@
 #include "display/hud_renderer.h"
+#include "display/lunar_calendar.h"
 
 #include "display/colors.h"
 #include "display/display_driver.h"
@@ -119,20 +120,50 @@ int64_t localClockMillis(const HudState &state) {
 constexpr int kV3NumberScaleNum = 6;
 constexpr int kV3NumberScaleDen = 5;
 
-// V3: small HH:MM in the top-right corner, right-aligned just left of the
-// Bluetooth indicator.
-void drawV3Clock(Canvas &canvas, const Rect &region, const HudState &state,
-                 const DeviceSettings &settings) {
+// V3 bottom-left cell when there is no next speed alert: time, date and the
+// Vietnamese lunar date, centered.
+void drawDateCard(Canvas &canvas, const HudState &state, const DeviceSettings &settings) {
     const int64_t millis = localClockMillis(state);
     if (millis == INT64_MIN) return;
-    const int normalizedMinute = static_cast<int>((millis / 60000LL % 1440 + 1440) % 1440);
-    char clock[8];
-    std::snprintf(clock, sizeof(clock), "%02d:%02d", normalizedMinute / 60, normalizedMinute % 60);
-    constexpr int rightEdge = 292;
-    constexpr int topY = 4;
-    const int textWidth = canvas.fontTextWidth(clock, assets::kTextMedium);
-    canvas.fontText(rightEdge - textWidth - region.x, topY - region.y, clock,
-                    assets::kTextMedium, foreground(settings));
+    const int64_t days = (millis >= 0 ? millis : millis - 86399999LL) / 86400000LL;
+    const int minuteOfDay = std::clamp(static_cast<int>((millis - days * 86400000LL) / 60000LL), 0, 1439);
+    const lunar::SolarDate solar = lunar::civilFromDays(days);
+    const lunar::LunarDate lunarDate = lunar::solarToLunar(solar.day, solar.month, solar.year);
+    static const char *const weekdays[] = {"Chủ Nhật", "Thứ Hai", "Thứ Ba", "Thứ Tư",
+                                           "Thứ Năm", "Thứ Sáu", "Thứ Bảy"};
+
+    char hours[8], minutes[8], date[40], lunarLine[48];
+    std::snprintf(hours, sizeof(hours), "%02d", minuteOfDay / 60);
+    std::snprintf(minutes, sizeof(minutes), "%02d", minuteOfDay % 60);
+    std::snprintf(date, sizeof(date), "%s %02d/%02d/%04d", weekdays[lunar::weekdayFromDays(days)],
+                  solar.day, solar.month, solar.year);
+    std::snprintf(lunarLine, sizeof(lunarLine), "ÂL %02d/%02d%s %s %s", lunarDate.day, lunarDate.month,
+                  lunarDate.leap ? " nhuận" : "", lunar::canName(lunarDate.year),
+                  lunar::chiName(lunarDate.year));
+
+    constexpr int scaleNum = 3, scaleDen = 2;
+    const int timeHeight = assets::kNumberMedium.lineHeight * scaleNum / scaleDen;
+    const int smallHeight = assets::kTextSmall.lineHeight;
+    const int gap = 3;
+    const int total = timeHeight + gap + smallHeight + 1 + smallHeight;
+    int y = std::max(0, (canvas.height() - total) / 2);
+    // The digit font has no ':' glyph, so the colon is drawn as two small squares.
+    const int hoursWidth = canvas.fontTextWidth(hours, assets::kNumberMedium) * scaleNum / scaleDen;
+    const int minutesWidth = canvas.fontTextWidth(minutes, assets::kNumberMedium) * scaleNum / scaleDen;
+    constexpr int colonWidth = 12, dot = 4;
+    const int timeX = (canvas.width() - (hoursWidth + colonWidth + minutesWidth)) / 2;
+    canvas.fontTextScaled(timeX, y, hours, assets::kNumberMedium, foreground(settings),
+                          -1, false, scaleNum, scaleDen);
+    canvas.fillRect(timeX + hoursWidth + (colonWidth - dot) / 2, y + timeHeight * 3 / 10, dot, dot,
+                    foreground(settings));
+    canvas.fillRect(timeX + hoursWidth + (colonWidth - dot) / 2, y + timeHeight * 3 / 5, dot, dot,
+                    foreground(settings));
+    canvas.fontTextScaled(timeX + hoursWidth + colonWidth, y, minutes, assets::kNumberMedium,
+                          foreground(settings), -1, false, scaleNum, scaleDen);
+    y += timeHeight + gap;
+    canvas.fontText(2, y, date, assets::kTextSmall, foreground(settings), canvas.width() - 4, true);
+    y += smallHeight + 1;
+    canvas.fontText(2, y, lunarLine, assets::kTextSmall, colors::Amber, canvas.width() - 4, true);
 }
 
 const char *displayStreet(const HudState &state) {
@@ -611,12 +642,11 @@ void HudRenderer::render(const HudState &state, const DeviceSettings &settings,
                                   state.minimumSpeedKmh != previous_.minimumSpeedKmh;
         const bool clockChanged = currentClockMinute != renderedClockMinute_;
         if (limitChanged) renderRegion(layout::V3Sign,state,settings,systemStatus);
-        if (speedChanged || systemStatusChanged || clockChanged)
+        if (speedChanged || systemStatusChanged)
             renderRegion(layout::V3Speed,state,settings,systemStatus);
-        if (alertsChanged(state, previous_)) {
-            renderRegion(layout::V3NextAlert,state,settings,systemStatus);
-            renderRegion(layout::V3Alert,state,settings,systemStatus);
-        }
+        const bool alertsDiffer = alertsChanged(state, previous_);
+        if (alertsDiffer || clockChanged) renderRegion(layout::V3NextAlert,state,settings,systemStatus);
+        if (alertsDiffer) renderRegion(layout::V3Alert,state,settings,systemStatus);
         if (streetChanged || settings.showStreet != previousSettings_.showStreet || marqueeFrameChanged) {
             renderRegion(layout::V3Street,state,settings,systemStatus);
             streetRendered = true;
@@ -686,8 +716,6 @@ void HudRenderer::renderRegion(const Rect &region, const HudState &state,
     else renderStreet(canvas,state,settings);
     if (!systemStatus.visible && state.connected && state.hasProducerState) {
         renderMainIndicators(canvas, region, systemStatus);
-        if (v3Mode(settings) && sameRegion(region, layout::V3Speed))
-            drawV3Clock(canvas, region, state, settings);
     }
     const esp_err_t result = DisplayDriver::instance().drawRegion(physicalRegion, buffer_);
     if (result != ESP_OK) ESP_LOGE(kTag, "Dirty region (%d,%d %dx%d) failed: %s",
@@ -1086,7 +1114,10 @@ void HudRenderer::renderV3Alert(Canvas &canvas, const HudState &state,
                                 const DeviceSettings &settings, bool speedSlot) {
     canvas.clear(colors::Panel);
     const AlertState alert = speedSlot ? nextSpeedAlert(state) : otherAlert(state);
-    if (alert.kind == AlertKind::None) return;
+    if (alert.kind == AlertKind::None) {
+        if (speedSlot) drawDateCard(canvas, state, settings);
+        return;
+    }
     char distance[16]; formatDistance(alert.distanceM,distance,sizeof(distance));
     // Icon above the distance, centered in the cell.
     const int iconY = canvas.height() / 3;
