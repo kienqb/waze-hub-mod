@@ -245,7 +245,7 @@ void uiTask(void *) {
 #if CONFIG_WAZE_HUD_DISPLAY_CYD_28
     auto lightAdc = initLightSensor();
     if (!lightAdc) ESP_LOGW(kTag, "LDR unavailable; using configured brightness");
-    uint8_t autoBrightness = 70;
+    uint8_t autoBrightness = 100;
     TickType_t lastLightSample = xTaskGetTickCount();
     int lightRaw = 0;
     if (lightAdc && sampleLight(lightAdc, lightRaw)) {
