@@ -71,17 +71,20 @@ constexpr Rect Guidance{0, MainHeight, Width, GuidanceHeight};
 constexpr Rect Street{0, MainHeight + GuidanceHeight, Width, StreetHeight};
 constexpr Rect Full{0, 0, Width, Height};
 
-// "V3" layout (no turn-by-turn, no street name). Top row: current speed-limit
-// sign (left) and current speed (right). Bottom row: next speed alert (left)
-// and any other alert (right). A street-name strip runs along the bottom.
-constexpr int V3SplitX = Width / 2;
-constexpr int V3MainHeight = Height * 140 / 240;
-constexpr Rect V3Sign{0, 0, V3SplitX, V3MainHeight};
-constexpr Rect V3Speed{V3SplitX, 0, Width - V3SplitX, V3MainHeight};
-constexpr int V3StreetHeight = Height * 28 / 240;
-constexpr Rect V3NextAlert{0, V3MainHeight, V3SplitX, Height - V3MainHeight - V3StreetHeight};
-constexpr Rect V3Alert{V3SplitX, V3MainHeight, Width - V3SplitX, Height - V3MainHeight - V3StreetHeight};
-constexpr Rect V3Street{0, Height - V3StreetHeight, Width, V3StreetHeight};
+// "V5" layout (no turn-by-turn). Top row: date block (left), current speed
+// (middle), speed-limit sign (right). Bottom row: time with the street name
+// under it (left), nearest and next alert side by side (right).
+constexpr int V5TopHeight = Height * 124 / 240;
+constexpr int V5TimeHeight = Height * 72 / 240;
+constexpr int V5LeftWidth = Width * 184 / 320;
+constexpr int V5InfoWidth = Width * 112 / 320;
+constexpr int V5SpeedWidth = Width * 88 / 320;
+constexpr Rect V5Info{0, 0, V5InfoWidth, V5TopHeight};
+constexpr Rect V5Speed{V5InfoWidth, 0, V5SpeedWidth, V5TopHeight};
+constexpr Rect V5Sign{V5InfoWidth + V5SpeedWidth, 0, Width - V5InfoWidth - V5SpeedWidth, V5TopHeight};
+constexpr Rect V5Time{0, V5TopHeight, V5LeftWidth, V5TimeHeight};
+constexpr Rect V5Street{0, V5TopHeight + V5TimeHeight, V5LeftWidth, Height - V5TopHeight - V5TimeHeight};
+constexpr Rect V5Alerts{V5LeftWidth, V5TopHeight, Width - V5LeftWidth, Height - V5TopHeight};
 
 constexpr int scaleCoordinate(int value, int logicalExtent, int physicalExtent) {
     return (value * physicalExtent + logicalExtent / 2) / logicalExtent;
@@ -103,9 +106,9 @@ constexpr int regionPixels(const Rect &logical) {
 
 constexpr int maxInt(int left, int right) { return left > right ? left : right; }
 constexpr int MaxV3RegionPixels = maxInt(
-    maxInt(maxInt(regionPixels(V3Sign), regionPixels(V3Speed)),
-           maxInt(regionPixels(V3Alert), regionPixels(V3NextAlert))),
-    regionPixels(V3Street));
+    maxInt(maxInt(regionPixels(V5Info), regionPixels(V5Speed)),
+           maxInt(regionPixels(V5Sign), regionPixels(V5Time))),
+    maxInt(regionPixels(V5Street), regionPixels(V5Alerts)));
 constexpr int MaxRegionPixels = maxInt(maxInt(
     maxInt(maxInt(regionPixels(Maneuver), regionPixels(Speed)), regionPixels(SpeedCluster)),
     maxInt(maxInt(regionPixels(Limits), regionPixels(Alerts)),

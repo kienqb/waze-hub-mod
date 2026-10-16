@@ -35,8 +35,9 @@ private:
     void renderStreet(Canvas &canvas, const HudState &state, const DeviceSettings &settings);
     void renderV3Sign(Canvas &canvas, const HudState &state);
     void renderV3Speed(Canvas &canvas, const HudState &state, const DeviceSettings &settings);
-    void renderV3Alert(Canvas &canvas, const HudState &state, const DeviceSettings &settings,
-                       bool speedSlot);
+    void renderV5Info(Canvas &canvas, const HudState &state, const DeviceSettings &settings);
+    void renderV5Time(Canvas &canvas, const HudState &state, const DeviceSettings &settings);
+    void renderV5Alerts(Canvas &canvas, const HudState &state, const DeviceSettings &settings);
     void renderOverspeedBorder(const HudState &state, const DeviceSettings &settings, bool forceRedraw);
     void drawBorderEdge(const Rect &edge, uint16_t color);
 
