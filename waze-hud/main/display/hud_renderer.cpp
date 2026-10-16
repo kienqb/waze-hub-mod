@@ -117,12 +117,14 @@ int64_t localClockMillis(const HudState &state) {
 }
 
 // V3: the big digits (speed and limit sign) are drawn at 6/5 of the font size.
+constexpr uint16_t kAccent = colors::rgb565(110, 235, 215);
 constexpr int kV3NumberScaleNum = 6;
 constexpr int kV3NumberScaleDen = 5;
 
 // V3 bottom-left cell when there is no next speed alert: time, date and the
 // Vietnamese lunar date, centered.
-void drawDateCard(Canvas &canvas, const HudState &state, const DeviceSettings &settings) {
+void drawDateCard(Canvas &canvas, const HudState &state, const DeviceSettings &settings,
+                  int boxX, int boxY, int boxWidth, int boxHeight, bool large = false) {
     const int64_t millis = localClockMillis(state);
     if (millis == INT64_MIN) return;
     const int64_t days = (millis >= 0 ? millis : millis - 86399999LL) / 86400000LL;
@@ -135,35 +137,37 @@ void drawDateCard(Canvas &canvas, const HudState &state, const DeviceSettings &s
     char hours[8], minutes[8], date[40], lunarLine[48];
     std::snprintf(hours, sizeof(hours), "%02d", minuteOfDay / 60);
     std::snprintf(minutes, sizeof(minutes), "%02d", minuteOfDay % 60);
-    std::snprintf(date, sizeof(date), "%s %02d/%02d/%04d", weekdays[lunar::weekdayFromDays(days)],
-                  solar.day, solar.month, solar.year);
-    std::snprintf(lunarLine, sizeof(lunarLine), "ÂL %02d/%02d%s %s %s", lunarDate.day, lunarDate.month,
-                  lunarDate.leap ? " nhuận" : "", lunar::canName(lunarDate.year),
-                  lunar::chiName(lunarDate.year));
+    std::snprintf(date, sizeof(date), "%s %02d/%02d", weekdays[lunar::weekdayFromDays(days)],
+                  solar.day, solar.month);
+    std::snprintf(lunarLine, sizeof(lunarLine), "ÂL %02d/%02d%s", lunarDate.day, lunarDate.month,
+                  lunarDate.leap ? " nhuận" : "");
 
-    constexpr int scaleNum = 3, scaleDen = 2;
-    const int timeHeight = assets::kNumberMedium.lineHeight * scaleNum / scaleDen;
-    const int smallHeight = assets::kTextSmall.lineHeight;
-    const int gap = 3;
-    const int total = timeHeight + gap + smallHeight + 1 + smallHeight;
-    int y = std::max(0, (canvas.height() - total) / 2);
+    // large: waiting screen (big digits, medium text); otherwise the compact HUD cell.
+    const assets::BitmapFont &numberFont = large ? assets::kNumberLarge : assets::kNumberMedium;
+    const assets::BitmapFont &textFont = large ? assets::kTextMedium : assets::kTextSmall;
+    const int scaleNum = large ? 2 : 3, scaleDen = large ? 1 : 2;
+    const int timeHeight = numberFont.lineHeight * scaleNum / scaleDen;
+    const int smallHeight = textFont.lineHeight;
+    const int gap = large ? 8 : 3;
+    const int total = timeHeight + gap + smallHeight + (large ? 4 : 1) + smallHeight;
+    int y = boxY + std::max(0, (boxHeight - total) / 2);
     // The digit font has no ':' glyph, so the colon is drawn as two small squares.
-    const int hoursWidth = canvas.fontTextWidth(hours, assets::kNumberMedium) * scaleNum / scaleDen;
-    const int minutesWidth = canvas.fontTextWidth(minutes, assets::kNumberMedium) * scaleNum / scaleDen;
-    constexpr int colonWidth = 12, dot = 4;
-    const int timeX = (canvas.width() - (hoursWidth + colonWidth + minutesWidth)) / 2;
-    canvas.fontTextScaled(timeX, y, hours, assets::kNumberMedium, foreground(settings),
+    const int hoursWidth = canvas.fontTextWidth(hours, numberFont) * scaleNum / scaleDen;
+    const int minutesWidth = canvas.fontTextWidth(minutes, numberFont) * scaleNum / scaleDen;
+    const int colonWidth = large ? 26 : 12, dot = large ? 8 : 4;
+    const int timeX = boxX + (boxWidth - (hoursWidth + colonWidth + minutesWidth)) / 2;
+    canvas.fontTextScaled(timeX, y, hours, numberFont, foreground(settings),
                           -1, false, scaleNum, scaleDen);
     canvas.fillRect(timeX + hoursWidth + (colonWidth - dot) / 2, y + timeHeight * 3 / 10, dot, dot,
                     foreground(settings));
     canvas.fillRect(timeX + hoursWidth + (colonWidth - dot) / 2, y + timeHeight * 3 / 5, dot, dot,
                     foreground(settings));
-    canvas.fontTextScaled(timeX + hoursWidth + colonWidth, y, minutes, assets::kNumberMedium,
+    canvas.fontTextScaled(timeX + hoursWidth + colonWidth, y, minutes, numberFont,
                           foreground(settings), -1, false, scaleNum, scaleDen);
     y += timeHeight + gap;
-    canvas.fontText(2, y, date, assets::kTextSmall, foreground(settings), canvas.width() - 4, true);
-    y += smallHeight + 1;
-    canvas.fontText(2, y, lunarLine, assets::kTextSmall, colors::Amber, canvas.width() - 4, true);
+    canvas.fontText(boxX + 2, y, date, textFont, foreground(settings), boxWidth - 4, true);
+    y += smallHeight + (large ? 4 : 1);
+    canvas.fontText(boxX + 2, y, lunarLine, textFont, colors::Amber, boxWidth - 4, true);
 }
 
 const char *displayStreet(const HudState &state) {
@@ -488,28 +492,6 @@ AlertState secondaryAlert(const HudState &state) {
     return upcoming == primaryAlert(state) ? AlertState{} : upcoming;
 }
 
-// V3 bottom row: all known alerts are split into "speed" (speed-limit sign
-// ahead) and "other" (police, camera, hazards...). Each slot shows the nearest.
-template <typename Pick>
-AlertState firstAlertWhere(const HudState &state, Pick pick) {
-    const AlertState primary = primaryAlert(state);
-    if (pick(primary)) return primary;
-    if (pick(state.nearestAlert)) return state.nearestAlert;
-    for (uint8_t index = 0; index < state.upcomingAlertCount; ++index)
-        if (pick(state.upcomingAlerts[index])) return state.upcomingAlerts[index];
-    return {};
-}
-
-AlertState nextSpeedAlert(const HudState &state) {
-    return firstAlertWhere(state, [](const AlertState &a) { return a.kind == AlertKind::SpeedDrop; });
-}
-
-AlertState otherAlert(const HudState &state) {
-    return firstAlertWhere(state, [](const AlertState &a) {
-        return a.kind != AlertKind::None && a.kind != AlertKind::SpeedDrop;
-    });
-}
-
 void formatDistance(int meters, char *output, size_t capacity) {
     if (meters < 0) { output[0] = 0; return; }
     if (meters < 1000) std::snprintf(output, capacity, "%d M", meters);
@@ -539,11 +521,11 @@ void HudRenderer::render(const HudState &state, const DeviceSettings &settings,
         ? INT64_MIN : currentClockSecond / 60;
     const int8_t currentClockPhase = currentClockMillis == INT64_MIN
         ? -1 : static_cast<int8_t>((currentClockMillis % 1000LL) < 500LL);
-    clockActive_ = state.connected && state.hasProducerState && currentClockSecond != INT64_MIN;
+    clockActive_ = currentClockSecond != INT64_MIN;
     const bool streetChanged = firstFrame_ || !sameText(state.currentStreet, previous_.currentStreet);
     const bool noNavigation = v3Mode(settings);
     const bool streetVisible = settings.showStreet;
-    const int availableStreetWidth = noNavigation ? layout::V3Street.width - 10
+    const int availableStreetWidth = noNavigation ? layout::V5Street.width - 10
         : currentClockMinute != INT64_MIN ? 248 : 310;
     Canvas metrics(buffer_, layout::Street.width, layout::Street.height);
     const int streetWidth = streetVisible
@@ -607,8 +589,8 @@ void HudRenderer::render(const HudState &state, const DeviceSettings &settings,
     };
     auto renderAll = [&]() {
         if (noNavigation) {
-            for (const Rect &region : {layout::V3Sign, layout::V3Speed, layout::V3NextAlert,
-                                       layout::V3Alert, layout::V3Street})
+            for (const Rect &region : {layout::V5Info, layout::V5Speed, layout::V5Sign,
+                                       layout::V5Time, layout::V5Street, layout::V5Alerts})
                 renderRegion(region,state,settings,systemStatus);
             return;
         }
@@ -629,7 +611,10 @@ void HudRenderer::render(const HudState &state, const DeviceSettings &settings,
     }
     const bool systemStatusClosed = previousSystemStatus_.visible;
     bool streetRendered = false;
-    if (systemStatusClosed || statusChanged || configChanged || !state.connected || !state.hasProducerState) {
+    const bool idle = !state.connected || !state.hasProducerState;
+    const bool idleChanged = state.signalStale != previous_.signalStale ||
+                             currentClockMinute != renderedClockMinute_;
+    if (systemStatusClosed || statusChanged || configChanged || (idle && idleChanged)) {
         renderAll();
         streetRendered = true;
     } else if (noNavigation) {
@@ -641,14 +626,15 @@ void HudRenderer::render(const HudState &state, const DeviceSettings &settings,
                                   state.hasMinimumSpeed != previous_.hasMinimumSpeed ||
                                   state.minimumSpeedKmh != previous_.minimumSpeedKmh;
         const bool clockChanged = currentClockMinute != renderedClockMinute_;
-        if (limitChanged) renderRegion(layout::V3Sign,state,settings,systemStatus);
-        if (speedChanged || systemStatusChanged)
-            renderRegion(layout::V3Speed,state,settings,systemStatus);
-        const bool alertsDiffer = alertsChanged(state, previous_);
-        if (alertsDiffer || clockChanged) renderRegion(layout::V3NextAlert,state,settings,systemStatus);
-        if (alertsDiffer) renderRegion(layout::V3Alert,state,settings,systemStatus);
+        if (limitChanged || systemStatusChanged) renderRegion(layout::V5Sign,state,settings,systemStatus);
+        if (speedChanged) renderRegion(layout::V5Speed,state,settings,systemStatus);
+        if (clockChanged) {
+            renderRegion(layout::V5Info,state,settings,systemStatus);
+            renderRegion(layout::V5Time,state,settings,systemStatus);
+        }
+        if (alertsChanged(state, previous_)) renderRegion(layout::V5Alerts,state,settings,systemStatus);
         if (streetChanged || settings.showStreet != previousSettings_.showStreet || marqueeFrameChanged) {
-            renderRegion(layout::V3Street,state,settings,systemStatus);
+            renderRegion(layout::V5Street,state,settings,systemStatus);
             streetRendered = true;
         }
     } else {
@@ -709,10 +695,11 @@ void HudRenderer::renderRegion(const Rect &region, const HudState &state,
     else if (sameRegion(region, layout::Limits)) renderLimits(canvas,state,settings);
     else if (sameRegion(region, layout::Alerts)) renderAlerts(canvas,state,settings);
     else if (sameRegion(region, layout::Guidance)) renderGuidance(canvas,state,settings);
-    else if (sameRegion(region, layout::V3Sign)) renderV3Sign(canvas,state);
-    else if (sameRegion(region, layout::V3Speed)) renderV3Speed(canvas,state,settings);
-    else if (sameRegion(region, layout::V3NextAlert)) renderV3Alert(canvas,state,settings,true);
-    else if (sameRegion(region, layout::V3Alert)) renderV3Alert(canvas,state,settings,false);
+    else if (sameRegion(region, layout::V5Info)) renderV5Info(canvas,state,settings);
+    else if (sameRegion(region, layout::V5Speed)) renderV3Speed(canvas,state,settings);
+    else if (sameRegion(region, layout::V5Sign)) renderV3Sign(canvas,state);
+    else if (sameRegion(region, layout::V5Time)) renderV5Time(canvas,state,settings);
+    else if (sameRegion(region, layout::V5Alerts)) renderV5Alerts(canvas,state,settings);
     else renderStreet(canvas,state,settings);
     if (!systemStatus.visible && state.connected && state.hasProducerState) {
         renderMainIndicators(canvas, region, systemStatus);
@@ -750,7 +737,7 @@ void HudRenderer::renderMainIndicators(Canvas &canvas, const Rect &region,
                         batteryColor, 38, false);
     }
 
-    if (sameRegion(region, layout::Alerts) || sameRegion(region, layout::V3Speed)) {
+    if (sameRegion(region, layout::Alerts) || sameRegion(region, layout::V5Sign)) {
         // Compact Bluetooth rune and four RSSI bars in the upper-right corner.
         constexpr int bluetoothX = 303;
         const int top = mainY(2);
@@ -867,18 +854,17 @@ void HudRenderer::renderSystemStatus(Canvas &canvas, const Rect &region,
 
 void HudRenderer::renderStatus(Canvas &canvas, const Rect &region, const HudState &state, const DeviceSettings &settings) {
     canvas.clear(colors::Background);
-    canvas.colorBitmap(16 - region.x, screenY(25) - region.y, assets::kBootIcon);
-    constexpr int copyX = 120;
-    constexpr int copyWidth = 190;
-    canvas.fontText(copyX - region.x, screenY(34) - region.y, "WazeHUD", assets::kTextLarge,
-                    colors::Foreground, copyWidth, true);
-    const char *status = state.signalStale ? "Mất tín hiệu" : state.connected ? "Đã kết nối" : "Đang chờ thiết bị";
-    const uint16_t statusColor = state.signalStale ? colors::Amber : state.connected ? colors::Green : colors::Muted;
-    canvas.fontText(copyX - region.x, screenY(73) - region.y, status, assets::kTextMedium,
-                    statusColor, copyWidth, true);
+    // Waiting screen: big time / date / lunar date centered (once the phone has
+    // synced the clock during this power-on; the board has no RTC), and a single
+    // status line at the very bottom.
+    constexpr int statusHeight = 34;
+    drawDateCard(canvas, state, settings, -region.x, -region.y, layout::Width,
+                 layout::Height - statusHeight, true);
     const char *detail = state.signalStale ? "Đang đợi dữ liệu" : state.connected ? "Đang chờ WazeMod" : "Đang chờ kết nối";
-    canvas.fontText(copyX - region.x, screenY(103) - region.y, detail, assets::kTextSmall,
-                    foreground(settings), copyWidth, true);
+    const uint16_t detailColor = state.signalStale ? colors::Amber : state.connected ? colors::Green
+                                                                                      : foreground(settings);
+    canvas.fontText(-region.x, layout::Height - statusHeight + 8 - region.y, detail, assets::kTextMedium,
+                    detailColor, layout::Width, true);
 }
 
 void HudRenderer::renderManeuver(Canvas &canvas, const HudState &state, const DeviceSettings &settings) {
@@ -1072,9 +1058,10 @@ void HudRenderer::renderV3Sign(Canvas &canvas, const HudState &state) {
         canvas.fillCircle(signX, signY, innerRadius, colors::White);
         char limit[5];
         std::snprintf(limit, sizeof(limit), "%d", state.speedLimitKmh);
-        canvas.fontTextScaled(signX - innerRadius,
+        // Keep a margin to the ring: three-digit limits fall back to the plain size.
+        canvas.fontTextScaled(signX - innerRadius + 6,
                               signY - assets::kNumberLarge.lineHeight * kV3NumberScaleNum / kV3NumberScaleDen / 2,
-                              limit, assets::kNumberLarge, colors::Black, innerRadius * 2, true,
+                              limit, assets::kNumberLarge, colors::Black, innerRadius * 2 - 12, true,
                               kV3NumberScaleNum, kV3NumberScaleDen);
     } else if (assets::kNoSpeedCurrent.pixels && assets::kNoSpeedCurrent.alpha) {
         canvas.colorBitmap(signX - assets::kNoSpeedCurrent.width / 2,
@@ -1110,21 +1097,80 @@ void HudRenderer::renderV3Speed(Canvas &canvas, const HudState &state,
                     colors::Muted,canvas.width()-4,true);
 }
 
-void HudRenderer::renderV3Alert(Canvas &canvas, const HudState &state,
-                                const DeviceSettings &settings, bool speedSlot) {
+void HudRenderer::renderV5Info(Canvas &canvas, const HudState &state, const DeviceSettings &settings) {
     canvas.clear(colors::Panel);
-    const AlertState alert = speedSlot ? nextSpeedAlert(state) : otherAlert(state);
-    if (alert.kind == AlertKind::None) {
-        if (speedSlot) drawDateCard(canvas, state, settings);
-        return;
+    const int64_t millis = localClockMillis(state);
+    if (millis == INT64_MIN) return;
+    const int64_t days = (millis >= 0 ? millis : millis - 86399999LL) / 86400000LL;
+    const lunar::SolarDate solar = lunar::civilFromDays(days);
+    const lunar::LunarDate lunarDate = lunar::solarToLunar(solar.day, solar.month, solar.year);
+    static const char *const weekdays[] = {"Chủ Nhật", "Thứ Hai", "Thứ Ba", "Thứ Tư",
+                                           "Thứ Năm", "Thứ Sáu", "Thứ Bảy"};
+    char date[16], lunarLine[24];
+    std::snprintf(date, sizeof(date), "%02d/%02d", solar.day, solar.month);
+    std::snprintf(lunarLine, sizeof(lunarLine), "%02d/%02d ÂL", lunarDate.day, lunarDate.month);
+
+    // Calendar block: weekday and lunar date at 1.3x, day/month at 1.6x; a small
+    // "tháng nhuận" line only appears in a leap lunar month.
+    constexpr int smallNum = 13, bigNum = 8, smallDen = 10, bigDen = 5;
+    const int weekdayHeight = assets::kTextMedium.lineHeight * smallNum / smallDen;
+    const int dateHeight = assets::kTextMedium.lineHeight * bigNum / bigDen;
+    const int leapHeight = assets::kTextSmall.lineHeight;
+    const int gap = 5;
+    const int total = weekdayHeight + dateHeight + weekdayHeight + 2 * gap +
+                      (lunarDate.leap ? leapHeight + gap : 0);
+    const int x = 6, width = canvas.width() - x - 2;
+    int y = std::max(0, (canvas.height() - total) / 2);
+    canvas.fontTextScaled(x, y, weekdays[lunar::weekdayFromDays(days)], assets::kTextMedium, kAccent,
+                          width, false, smallNum, smallDen);
+    y += weekdayHeight + gap;
+    canvas.fontTextScaled(x, y, date, assets::kTextMedium, foreground(settings), width, false, bigNum, bigDen);
+    y += dateHeight + gap;
+    canvas.fontTextScaled(x, y, lunarLine, assets::kTextMedium, foreground(settings), width, false,
+                          smallNum, smallDen);
+    if (lunarDate.leap) {
+        y += weekdayHeight + gap;
+        canvas.fontText(x, y, "tháng nhuận", assets::kTextSmall, kAccent, width);
     }
-    char distance[16]; formatDistance(alert.distanceM,distance,sizeof(distance));
-    // Icon above the distance, centered in the cell.
-    const int iconY = canvas.height() / 3;
-    drawAlertIcon(canvas,canvas.width()/2,iconY,22,alert,true);
-    canvas.fontText(2,iconY + 25,distance,assets::kTextMedium,
-                    alertDistanceColor(alert.distanceM, foreground(settings)),
-                    canvas.width()-4,true);
+}
+
+void HudRenderer::renderV5Time(Canvas &canvas, const HudState &state, const DeviceSettings &settings) {
+    canvas.clear(colors::Panel);
+    const int64_t millis = localClockMillis(state);
+    if (millis == INT64_MIN) return;
+    const int minuteOfDay = static_cast<int>((millis / 60000LL % 1440 + 1440) % 1440);
+    char hours[8], minutes[8];
+    std::snprintf(hours, sizeof(hours), "%02d", minuteOfDay / 60);
+    std::snprintf(minutes, sizeof(minutes), "%02d", minuteOfDay % 60);
+    // The digit font has no ':' glyph, so the colon is drawn as two small squares.
+    const int hoursWidth = canvas.fontTextWidth(hours, assets::kNumberLarge);
+    const int minutesWidth = canvas.fontTextWidth(minutes, assets::kNumberLarge);
+    constexpr int colonWidth = 18, dot = 6;
+    const int x = std::max(0, (canvas.width() - (hoursWidth + colonWidth + minutesWidth)) / 2);
+    const int y = std::max(0, (canvas.height() - assets::kNumberLarge.lineHeight) / 2);
+    canvas.fontText(x, y, hours, assets::kNumberLarge, foreground(settings));
+    canvas.fillRect(x + hoursWidth + (colonWidth - dot) / 2, y + assets::kNumberLarge.lineHeight * 3 / 10,
+                    dot, dot, foreground(settings));
+    canvas.fillRect(x + hoursWidth + (colonWidth - dot) / 2, y + assets::kNumberLarge.lineHeight * 3 / 5,
+                    dot, dot, foreground(settings));
+    canvas.fontText(x + hoursWidth + colonWidth, y, minutes, assets::kNumberLarge, foreground(settings));
+}
+
+void HudRenderer::renderV5Alerts(Canvas &canvas, const HudState &state, const DeviceSettings &settings) {
+    canvas.clear(colors::Panel);
+    const AlertState alerts[2] = {primaryAlert(state), secondaryAlert(state)};
+    const int slotWidth = canvas.width() / 2;
+    const int iconY = canvas.height() * 2 / 5;
+    for (int slot = 0; slot < 2; ++slot) {
+        const AlertState &alert = alerts[slot];
+        if (alert.kind == AlertKind::None) continue;
+        char distance[16]; formatDistance(alert.distanceM, distance, sizeof(distance));
+        const int centerX = slot * slotWidth + slotWidth / 2;
+        drawAlertIcon(canvas, centerX, iconY, 22, alert, true);
+        canvas.fontText(slot * slotWidth + 1, iconY + 30, distance, assets::kTextMedium,
+                        alertDistanceColor(alert.distanceM, foreground(settings)),
+                        slotWidth - 2, true);
+    }
 }
 
 namespace {
